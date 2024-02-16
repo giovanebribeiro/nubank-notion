@@ -1,37 +1,37 @@
 import json, datetime
-
+import logging
+import logging.handlers
 import requests
-
 from datetime import timedelta, datetime
 
 from pynubank import Nubank
 
-nu = Nubank()
+LOG_LEVEL=logging.DEBUG
 
+categories = {
+	"sa\u00fade": "b01e7b9fb16640ca8fabf1b58a6b7501", 					# categoria 'saúde'
+	"servi\u00e7os": "e8a3abea79b440cfb09422e978e298f1", 				# categoria 'serviços'
+	"outros": "fcb23f373c28469aac558525f7fccf9d", 						# categoria 'livre'
+	"supermercado": "4faadd6e4c8844d1a1fd4913ead4c4dc",					# categoria 'mercado'
+	"educa\u00e7\u00e3o": "89ff010acbfe4fc1930049c130691bf8" 			# categoria 'educação'
+}
+
+log = logging.getLogger("nubank-notion")
+
+syslog_handler = logging.handlers.SysLogHandler(address='/dev/log')
+log.addHandler(syslog_handler)
+stream_handler = logging.StreamHandler()
+log.addHandler(stream_handler)
+
+log.setLevel(LOG_LEVEL)
+
+log.debug("Carregando arquivo de variáveis sensíveis")
 with open('./secret.json', 'r') as s:
 	creds = json.loads(s.read())
 	s.close()
 
-nu_creds = creds.get("nubank")
 
-nu.authenticate_with_cert(nu_creds.get('user'), nu_creds.get('pass'), './cert.p12')
-
-card_statements = nu.get_card_statements()
-def comp(d):
-	t = d.get("time") 
-	try:
-		t = datetime.strptime(t, "%Y-%m-%dT%H:%M:%SZ")
-	except ValueError:
-		t = datetime.strptime(t, "%Y-%m-%dT%H:%M:%S.%fZ")
-
-
-	if t > (datetime.now() - timedelta(days=1)):
-		return d
-	else:
-		pass
-
-today_transactions = list(filter(comp, card_statements))
-
+log.debug("Carregando variáveis referentes ao Notion")
 notion_creds = creds.get("notion")
 notion_token = notion_creds.get("token")
 notion_database = notion_creds.get("database_id")
@@ -45,14 +45,102 @@ notion_headers = {
 
 notion_url = f"https://api.notion.com/v1"
 
-categories = {
-	"sa\u00fade": "b01e7b9fb16640ca8fabf1b58a6b7501",
-	"servi\u00e7os": "e8a3abea79b440cfb09422e978e298f1",
-	"outros": "fcb23f373c28469aac558525f7fccf9d" # página (livre)
-}
+def transactions_filter(d):
+	t = d.get("time") 
+	try:
+		t = datetime.strptime(t, "%Y-%m-%dT%H:%M:%SZ")
+	except ValueError:
+		t = datetime.strptime(t, "%Y-%m-%dT%H:%M:%S.%fZ")
 
-for t in today_transactions:
 
+	if t > (datetime.now() - timedelta(days=1)):
+		return d
+	else:
+		pass
+
+def save_transaction(t, tt=None, ta=None, charge=1, total_charges=1):
+
+	if tt is None:
+		tt = t.get("time")
+
+	if ta is None:
+		ta = t.get("amount")
+
+	desc = t.get("description")
+	if total_charges > 1:
+		desc = f"{desc} ({charge}/{total_charges})"
+
+	data = {
+		"parent": {
+			"database_id": notion_database
+		},
+		"properties": {
+			"Name": {
+				"title": [
+					{
+						"text": {
+							"content": desc
+						}
+					}
+				]
+			},
+			"Date": {
+				"date": {
+					"start": tt
+				}
+			},
+			"bank_id_transaction": {
+				"rich_text": [
+					{
+						"text": {
+							"content": t.get("id")
+						}
+					}
+				]
+			},
+			"Value": {
+				"number": (ta/100)
+			},
+			"🏦 Origem": {
+				"relation": [
+					{
+						"id": "ca9e409f96534a4dbc81ae11fca38b35" # página NuCartão
+					}
+				]
+			}
+		}
+	}
+	
+	t_category = t.get("title")
+	page_id = categories.get(t_category)
+	if page_id is not None:
+		data.get("properties").update({
+			"✉️ Categoria": {
+				"relation": [
+					{
+						"id": page_id
+					}
+				]
+			}
+		})
+
+
+	payload = json.dumps(data)
+
+	resp = requests.request("POST", f"{notion_url}/pages", data=payload,  headers=notion_headers)
+	status_code = resp.status_code
+	if status_code == 200:
+		resp_id = resp.json().get("id")
+		log.info(f"Transação adicionada com sucesso: {resp_id}")
+	else:
+		log.error(f"Algum erro aconteceu... {resp.text}")
+
+nu = Nubank()
+nu_creds = creds.get("nubank")
+nu.authenticate_with_cert(nu_creds.get('user'), nu_creds.get('pass'), './cert.p12')
+card_statements = nu.get_card_statements()
+
+for t in card_statements:
 	# query if transaction exists
 	payload = json.dumps({
 		"filter": {
@@ -65,85 +153,43 @@ for t in today_transactions:
 	resp = requests.request("POST", f"{notion_url}/databases/{notion_database}/query", data=payload,  headers=notion_headers)
 	response = resp.json()
 
-	if len(response.get("results")) == 0:
-		print("Transação não encontrada. Adicionando ao Notion")
+	if len(response.get("results")) > 0:
+		log.warning("Transação encontrada! Nada a fazer...")
+		break
 
-		data = {
-			"parent": {
-				"database_id": notion_database
-			},
-			"properties": {
-				"Name": {
-					"title": [
-						{
-							"text": {
-								"content": t.get("description")
-							}
-						}
-					]
-				},
-				"Date": {
-					"date": {
-						"start": t.get("time")
-					}
-				},
-				"bank_id_transaction": {
-					"rich_text": [
-						{
-							"text": {
-								"content": t.get("id")
-							}
-						}
-					]
-				},
-				"Value": {
-					"number": (t.get("amount")/100)
-				},
-				"🏦 Origem": {
-					"relation": [
-						{
-							"id": "ca9e409f96534a4dbc81ae11fca38b35" # página NuCartão
-						}
-					]
-				}
-			}
-		}
-		
-		t_category = t.get("title")
-		page_id = categories.get(t_category)
-		if page_id is not None:
-			data.get("properties").update({
-				"✉️ Categoria": {
-					"relation": [
-						{
-							"id": page_id
-						}
-					]
-				}
-			})
+	log.warning("Transação não encontrada. Adicionando ao Notion")
+	log.debug(json.dumps(t))
 
-
-		payload = json.dumps(data)
+	log.debug("Verificando a data da transação")
+	tt = t.get("time") 
+	try:
+		tt = datetime.strptime(tt, "%Y-%m-%dT%H:%M:%SZ")
+	except ValueError:
+		tt = datetime.strptime(tt, "%Y-%m-%dT%H:%M:%S.%fZ")
 	
-		resp = requests.request("POST", f"{notion_url}/pages", data=payload,  headers=notion_headers)
-		status_code = resp.status_code
-		if status_code == 200:
-			resp_id = resp.json().get("id")
-			print(f"Transação adicionada com sucesso: {resp_id}")
-		else:
-			print(f"Algum erro aconteceu... {resp.text}")
-			
+	if tt.day > 28: # se a data da compra for após o vencimento da fatura, coloque-a no próximo mês
+		next_month = tt.month + 1
+		tt = datetime(year=tt.year, month=next_month, day=1)
+
+	log.debug("Verificando as parcelas")
+	t_details = t.get("details")
+	
+	charges = t_details.get("charges")
+	if charges is None: # parcela única
+		log.debug("Transação não possui parcelas. ")
+		tt = tt.strftime("%Y-%m-%dT%H:%M:%SZ")
+		save_transaction(t, tt=tt)
 	else:
-		print("Transação encontrada! Nada a fazer...")
+		log.debug(f"Transação possui parcelas: {charges} ")
+		total_charges = charges.get("count")
+		for c in range(0, total_charges):
+			ta = charges.get("amount")
 
+			if total_charges > 1:
+				tt = tt + timedelta(days=(30*c+1))
 
+		
+			tt = tt.strftime("%Y-%m-%dT%H:%M:%SZ")
+			save_transaction(t=t, tt=tt, ta=ta, charge=(c+1), total_charges=total_charges)
 
-
-
-
-
-
-	#print(json.dumps(t))
-	#print(t.get("amount"))
-	#print(t.get("id"))
-	print("========================")
+	log.info("========================")
