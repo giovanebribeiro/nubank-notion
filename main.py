@@ -13,6 +13,7 @@ categories = {
 	"servi\u00e7os": "e8a3abea79b440cfb09422e978e298f1", 				# categoria 'serviços'
 	"outros": "fcb23f373c28469aac558525f7fccf9d", 						# categoria 'livre'
 	"supermercado": "4faadd6e4c8844d1a1fd4913ead4c4dc",					# categoria 'mercado'
+	"transporte": "606ba1a2ef084b0b84c8e19211acbf59",					# categoria 'transporte'
 	"educa\u00e7\u00e3o": "89ff010acbfe4fc1930049c130691bf8" 			# categoria 'educação'
 }
 
@@ -183,13 +184,15 @@ for t in card_statements:
 		log.debug(f"Transação possui parcelas: {charges} ")
 		total_charges = charges.get("count")
 		for c in range(0, total_charges):
-			ta = charges.get("amount")
+			ta = charges.get("ammount")
 
-			if total_charges > 1:
-				tt = tt + timedelta(days=(30*c+1))
+			new_tt = tt
+			if total_charges > 1 and c > 0:
+				next_days = 30*c
+				new_tt = tt + timedelta(days=next_days)
 
 		
-			tt = tt.strftime("%Y-%m-%dT%H:%M:%SZ")
-			save_transaction(t=t, tt=tt, ta=ta, charge=(c+1), total_charges=total_charges)
+			transaction_time = new_tt.strftime("%Y-%m-%dT%H:%M:%SZ")
+			save_transaction(t=t, tt=transaction_time, ta=ta, charge=(c+1), total_charges=total_charges)
 
 	log.info("========================")
