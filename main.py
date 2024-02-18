@@ -191,8 +191,8 @@ for t in card_statements:
 				next_days = 30*c
 				new_tt = tt + timedelta(days=next_days)
 
-		
 			transaction_time = new_tt.strftime("%Y-%m-%dT%H:%M:%SZ")
+			
 			save_transaction(t=t, tt=transaction_time, ta=ta, charge=(c+1), total_charges=total_charges)
 
 	log.info("========================")
