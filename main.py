@@ -2,11 +2,12 @@ import json, datetime
 import logging
 import logging.handlers
 import requests
+import calendar
 from datetime import timedelta, datetime
 
 from pynubank import Nubank
 
-LOG_LEVEL=logging.DEBUG
+LOG_LEVEL=logging.INFO
 
 categories = {
 	"sa\u00fade": "b01e7b9fb16640ca8fabf1b58a6b7501", 					# categoria 'saúde'
@@ -46,18 +47,36 @@ notion_headers = {
 
 notion_url = f"https://api.notion.com/v1"
 
-def transactions_filter(d):
-	t = d.get("time") 
-	try:
-		t = datetime.strptime(t, "%Y-%m-%dT%H:%M:%SZ")
-	except ValueError:
-		t = datetime.strptime(t, "%Y-%m-%dT%H:%M:%S.%fZ")
+payment_day = 6
 
+actual_month = datetime.now().month
+next_month = actual_month + 1
+payment_date = datetime(datetime.now().year, next_month, payment_day)
 
-	if t > (datetime.now() - timedelta(days=1)):
-		return d
-	else:
-		pass
+# Checando se a data de fechamento está em um final de semana
+week = ["segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo"]
+weekday = calendar.weekday(payment_date.year, payment_date.month, payment_date.day)
+log.debug(f"Dia da semana correspondente ao vencimento da fatura: {week[weekday]}")
+if weekday == 5:
+	# if weekday is saturday, closing date is moving to monday
+	payment_day = 8
+elif weekday == 6:
+	# if weekday is sunday, closing date is moving to monday
+	payment_day = 7
+
+# A partir da data de pagamento da fatura, subtraia X dias e você terá a data de fechamento da fatura
+payment_date = datetime(datetime.now().year, next_month, payment_day)
+print_date = payment_date.strftime("%d/%m/%Y")
+log.debug(f"Data de vencimento da fatura: {print_date}")
+
+if calendar.monthrange(datetime.now().year, actual_month)[1] == 31:
+	closing_date = payment_date - timedelta(days=9)
+else:
+	closing_date = payment_date - timedelta(days=8)
+
+print_date = closing_date.strftime("%d/%m/%Y")
+log.info(f"Data de fechamento da fatura: {print_date}")
+
 
 def save_transaction(t, tt=None, ta=None, charge=1, total_charges=1):
 
@@ -168,7 +187,7 @@ for t in card_statements:
 	except ValueError:
 		tt = datetime.strptime(tt, "%Y-%m-%dT%H:%M:%S.%fZ")
 	
-	if tt.day > 28: # se a data da compra for após o vencimento da fatura, coloque-a no próximo mês
+	if tt.day > closing_date.day: # se a data da compra for após o vencimento da fatura, coloque-a no próximo mês
 		next_month = tt.month + 1
 		tt = datetime(year=tt.year, month=next_month, day=1)
 
