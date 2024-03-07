@@ -13,6 +13,7 @@ categories = {
 	"sa\u00fade": "b01e7b9fb16640ca8fabf1b58a6b7501", 					# categoria 'saúde'
 	"servi\u00e7os": "e8a3abea79b440cfb09422e978e298f1", 				# categoria 'serviços'
 	"outros": "fcb23f373c28469aac558525f7fccf9d", 						# categoria 'livre'
+	"eletr\u00f4nicos": "fcb23f373c28469aac558525f7fccf9d", 			# categoria 'livre'
 	"supermercado": "4faadd6e4c8844d1a1fd4913ead4c4dc",					# categoria 'mercado'
 	"transporte": "606ba1a2ef084b0b84c8e19211acbf59",					# categoria 'transporte'
 	"educa\u00e7\u00e3o": "89ff010acbfe4fc1930049c130691bf8" 			# categoria 'educação'
@@ -151,7 +152,7 @@ def save_transaction(t, tt=None, ta=None, charge=1, total_charges=1):
 	status_code = resp.status_code
 	if status_code == 200:
 		resp_id = resp.json().get("id")
-		log.info(f"Transação adicionada com sucesso: {resp_id}")
+		log.info(f"Transação adicionada com sucesso ({desc} - {ta}): {resp_id}")
 	else:
 		log.error(f"Algum erro aconteceu... {resp.text}")
 
@@ -202,8 +203,8 @@ for t in card_statements:
 	else:
 		log.debug(f"Transação possui parcelas: {charges} ")
 		total_charges = charges.get("count")
+		ta = charges.get("amount")
 		for c in range(0, total_charges):
-			ta = charges.get("ammount")
 
 			new_tt = tt
 			if total_charges > 1 and c > 0:
